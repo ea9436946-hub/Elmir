@@ -1,0 +1,121 @@
+version: "3.8"
+
+# Komplettes System-Monitoring Stack
+# Wazuh SIEM + Suricata IDS + Prometheus + Grafana + Elmir
+
+services:
+
+  # ── Suricata IDS/IPS ──────────────────────────────────────────────────────
+  suricata:
+    image: jasonish/suricata:latest
+    container_name: suricata
+    restart: unless-stopped
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ./config/suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - suricata-logs:/var/log/suricata
+      - suricata-rules:/var/lib/suricata/rules
+    command: -i eth0 --af-packet
+    labels:
+      - "monitoring=true"
+
+  # ── Prometheus (Metriken) ─────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    networks:
+      - monitoring-net
+
+  # ── Node Exporter (System-Metriken: CPU, RAM, Disk, Netzwerk) ────────────
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+
+  # ── Grafana (Dashboards) ──────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=Monitor2024!
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - monitoring-net
+    depends_on:
+      - prometheus
+
+  # ── Elmir SIEM ────────────────────────────────────────────────────────────
+  elmir:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: elmir-siem
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "5514:5514/udp"
+      - "5514:5514/tcp"
+    volumes:
+      - ../config.yaml:/app/config.yaml:ro
+      - elmir-data:/app/data
+      - /var/log:/var/log:ro
+    environment:
+      - SIEM_LOG_LEVEL=INFO
+    networks:
+      - monitoring-net
+
+  # ── Alertmanager ──────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    networks:
+      - monitoring-net
+
+networks:
+  monitoring-net:
+    driver: bridge
+
+volumes:
+  suricata-logs:
+  suricata-rules:
+  prometheus-data:
+  grafana-data:
+  elmir-data:
