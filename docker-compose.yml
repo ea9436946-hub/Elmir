@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  siem:
+    build: .
+    container_name: elmir-siem
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "5514:5514/udp"
+      - "5514:5514/tcp"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - /var/log:/var/log:ro
+    environment:
+      - SIEM_LOG_LEVEL=INFO
+    networks:
+      - siem-net
+
+  # Optional: Uncomment for ELK integration
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  #   container_name: elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #   ports:
+  #     - "9200:9200"
+  #   networks:
+  #     - siem-net
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.11.0
+  #   container_name: kibana
+  #   ports:
+  #     - "5601:5601"
+  #   depends_on:
+  #     - elasticsearch
+  #   networks:
+  #     - siem-net
+
+  # logstash:
+  #   image: docker.elastic.co/logstash/logstash:8.11.0
+  #   container_name: logstash
+  #   ports:
+  #     - "5044:5044"
+  #     - "9600:9600"
+  #   networks:
+  #     - siem-net
+
+networks:
+  siem-net:
+    driver: bridge
+
+volumes:
+  siem-data:

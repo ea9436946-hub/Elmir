@@ -1,0 +1,64 @@
+siem:
+  name: "Elmir SIEM"
+  version: "1.0.0"
+  log_level: INFO
+
+storage:
+  db_path: "data/events.db"
+  max_events: 100000
+  retention_days: 90
+
+collectors:
+  file:
+    enabled: true
+    paths:
+      - /var/log/auth.log
+      - /var/log/syslog
+      - /var/log/apache2/access.log
+      - /var/log/nginx/access.log
+    poll_interval: 5
+
+  syslog:
+    enabled: true
+    udp_port: 5514
+    tcp_port: 5514
+    bind_host: "0.0.0.0"
+
+dashboard:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  secret_key: "change-me-in-production"
+
+alerts:
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    username: ""
+    password: ""
+    from_addr: "siem@company.com"
+    to_addrs:
+      - "security@company.com"
+
+  webhook:
+    enabled: false
+    url: ""
+    timeout: 10
+
+correlations:
+  brute_force:
+    enabled: true
+    threshold: 5
+    window_seconds: 60
+    severity: HIGH
+
+  port_scan:
+    enabled: true
+    threshold: 20
+    window_seconds: 30
+    severity: HIGH
+
+  privilege_escalation:
+    enabled: true
+    severity: CRITICAL
