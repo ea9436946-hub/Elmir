@@ -6,6 +6,7 @@ from .rules.privilege_escalation import PrivilegeEscalationRule
 from .rules.lateral_movement import LateralMovementRule
 from .rules.data_exfiltration import DataExfiltrationRule
 from .rules.malware_download import MalwareDownloadRule
+from .rules.phishing_email import PhishingEmailRule
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class RuleEngine:
             LateralMovementRule(cfg.get("lateral_movement", {})),
             DataExfiltrationRule(cfg.get("data_exfiltration", {})),
             MalwareDownloadRule(cfg.get("malware_download", {})),
+            PhishingEmailRule(cfg.get("phishing_email", {})),
         ]
 
     def on_alert(self, callback):

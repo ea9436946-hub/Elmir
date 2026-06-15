@@ -94,3 +94,7 @@ correlations:
   malware_download:
     enabled: true
     severity: CRITICAL
+
+  phishing_email:
+    enabled: true
+    severity: HIGH
