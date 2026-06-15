@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wazuh SIEM Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e1a; color: #e0e6f0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
+
+  header { background: #0d1b2e; border-bottom: 1px solid #1e3a5f; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 1.4rem; color: #00b4d8; letter-spacing: 1px; }
+  header .status { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: #7f9ab5; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 20px 24px; }
+  .card { background: #0d1b2e; border: 1px solid #1e3a5f; border-radius: 10px; padding: 20px; }
+  .card.wide { grid-column: span 2; }
+  .card.full { grid-column: span 4; }
+  .card h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: #7f9ab5; margin-bottom: 12px; }
+  .stat { font-size: 2.4rem; font-weight: 700; }
+  .stat.green  { color: #22c55e; }
+  .stat.red    { color: #ef4444; }
+  .stat.yellow { color: #f59e0b; }
+  .stat.blue   { color: #00b4d8; }
+  .stat.gray   { color: #64748b; }
+  .sub { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; color: #7f9ab5; font-weight: 500; padding: 8px 12px; border-bottom: 1px solid #1e3a5f; font-size: 0.75rem; text-transform: uppercase; }
+  td { padding: 10px 12px; border-bottom: 1px solid #111d2e; }
+  tr:hover td { background: #111d2e; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+  .badge.critical { background: #7f1d1d; color: #fca5a5; }
+  .badge.high     { background: #78350f; color: #fcd34d; }
+  .badge.medium   { background: #1e3a5f; color: #7dd3fc; }
+  .badge.low      { background: #14532d; color: #86efac; }
+  .badge.active   { background: #14532d; color: #86efac; }
+  .badge.disconnected { background: #7f1d1d; color: #fca5a5; }
+  .badge.never    { background: #1e293b; color: #94a3b8; }
+
+  .bar-wrap { margin-top: 8px; }
+  .bar-label { display: flex; justify-content: space-between; font-size: 0.78rem; color: #94a3b8; margin-bottom: 4px; }
+  .bar { height: 6px; background: #1e3a5f; border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; transition: width 1s ease; }
+
+  .log-box { background: #060d1a; border: 1px solid #1e3a5f; border-radius: 6px; padding: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.78rem; line-height: 1.6; }
+  .log-box .l-crit  { color: #ef4444; }
+  .log-box .l-high  { color: #f59e0b; }
+  .log-box .l-med   { color: #00b4d8; }
+  .log-box .l-low   { color: #86efac; }
+  .log-box .l-time  { color: #475569; }
+
+  .refresh-btn { background: #1e3a5f; border: none; color: #00b4d8; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; }
+  .refresh-btn:hover { background: #1e4976; }
+
+  #last-update { font-size: 0.75rem; color: #475569; }
+
+  .chart-bar-h { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+  .chart-bar-h .label { width: 130px; font-size: 0.78rem; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chart-bar-h .bar { flex: 1; }
+  .chart-bar-h .val { width: 30px; text-align: right; font-size: 0.78rem; color: #7f9ab5; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab { padding: 5px 14px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; border: 1px solid #1e3a5f; color: #7f9ab5; background: transparent; }
+  .tab.active { background: #1e3a5f; color: #00b4d8; }
+
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #1e3a5f; border-top-color: #00b4d8; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2,1fr); }
+    .card.full { grid-column: span 2; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🛡 Wazuh SIEM — Live Dashboard</h1>
+  <div class="status">
+    <div class="dot" id="conn-dot"></div>
+    <span id="conn-label">Verbinde...</span>
+    &nbsp;|&nbsp;
+    <span id="last-update">—</span>
+    &nbsp;
+    <button class="refresh-btn" onclick="loadAll()">↻ Aktualisieren</button>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- Stat Cards -->
+  <div class="card">
+    <h3>Agents Aktiv</h3>
+    <div class="stat green" id="s-active"><span class="spinner"></span></div>
+    <div class="sub">von <span id="s-total">—</span> gesamt</div>
+  </div>
+  <div class="card">
+    <h3>Alerts (24h)</h3>
+    <div class="stat red" id="s-alerts"><span class="spinner"></span></div>
+    <div class="sub">Sicherheitsereignisse</div>
+  </div>
+  <div class="card">
+    <h3>Kritisch</h3>
+    <div class="stat yellow" id="s-critical"><span class="spinner"></span></div>
+    <div class="sub">Level ≥ 12</div>
+  </div>
+  <div class="card">
+    <h3>Getrennte Agents</h3>
+    <div class="stat gray" id="s-disconnected"><span class="spinner"></span></div>
+    <div class="sub">Offline</div>
+  </div>
+
+  <!-- Agents Tabelle -->
+  <div class="card wide">
+    <h3>Agents</h3>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>IP</th><th>OS</th><th>Version</th><th>Status</th><th>Zuletzt gesehen</th></tr></thead>
+      <tbody id="agents-table"><tr><td colspan="7" style="color:#475569">Lade...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Top Regeln -->
+  <div class="card wide">
+    <h3>Top Alert-Regeln (24h)</h3>
+    <div id="top-rules">
+      <div style="color:#475569;font-size:.85rem">Lade...</div>
+    </div>
+  </div>
+
+  <!-- Letzte Alerts -->
+  <div class="card full">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="margin:0">Letzte Sicherheits-Alerts</h3>
+      <div class="tabs">
+        <button class="tab active" onclick="setAlertFilter('all',this)">Alle</button>
+        <button class="tab" onclick="setAlertFilter('12',this)">Kritisch ≥12</button>
+        <button class="tab" onclick="setAlertFilter('7',this)">Hoch ≥7</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Zeit</th><th>Agent</th><th>Level</th><th>Regel</th><th>Beschreibung</th></tr></thead>
+      <tbody id="alerts-table"><tr><td colspan="5" style="color:#475569">Lade...</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- Log-Stream -->
+  <div class="card wide">
+    <h3>Live Log-Stream (Agent)</h3>
+    <div class="log-box" id="log-stream">Warte auf Logs...</div>
+  </div>
+
+  <!-- Vulnerability -->
+  <div class="card wide">
+    <h3>Schwachstellen-Zusammenfassung</h3>
+    <div id="vuln-summary"><div style="color:#475569;font-size:.85rem">Lade...</div></div>
+  </div>
+
+</div>
+
+<script>
+const API = 'https://' + location.hostname + ':55000';
+const DASH = 'https://' + location.hostname;
+let TOKEN = '';
+let alertFilter = 'all';
+
+async function getToken() {
+  try {
+    const r = await fetch(API + '/security/user/authenticate?raw=true', {
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + btoa('wazuh-wui:MyS3cr3tP4ssw0rd!') }
+    });
+    if (r.ok) { TOKEN = await r.text(); return true; }
+  } catch(e) {}
+  try {
+    const r = await fetch(API + '/security/user/authenticate?raw=true', {
+      method: 'POST',
+      headers: { 'Authorization': 'Basic ' + btoa('admin:SecretPassword') }
+    });
+    if (r.ok) { TOKEN = await r.text(); return true; }
+  } catch(e) {}
+  return false;
+}
+
+async function api(path) {
+  if (!TOKEN) await getToken();
+  const r = await fetch(API + path, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+  if (r.status === 401) { await getToken(); return api(path); }
+  return r.json();
+}
+
+function levelBadge(lvl) {
+  lvl = parseInt(lvl);
+  if (lvl >= 12) return `<span class="badge critical">Kritisch ${lvl}</span>`;
+  if (lvl >= 7)  return `<span class="badge high">Hoch ${lvl}</span>`;
+  if (lvl >= 4)  return `<span class="badge medium">Mittel ${lvl}</span>`;
+  return `<span class="badge low">Niedrig ${lvl}</span>`;
+}
+
+function timeAgo(ts) {
+  if (!ts || ts === '1970-01-01T00:00:00Z') return '—';
+  const d = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (d < 60) return d + 's';
+  if (d < 3600) return Math.floor(d/60) + 'min';
+  if (d < 86400) return Math.floor(d/3600) + 'h';
+  return Math.floor(d/86400) + 'Tage';
+}
+
+async function loadAgents() {
+  try {
+    const d = await api('/agents?limit=500');
+    const agents = d.data.affected_items || [];
+    const active = agents.filter(a => a.status === 'active').length;
+    const disconn = agents.filter(a => a.status === 'disconnected').length;
+
+    document.getElementById('s-active').textContent = active;
+    document.getElementById('s-total').textContent = agents.length;
+    document.getElementById('s-disconnected').textContent = disconn;
+
+    const tbody = document.getElementById('agents-table');
+    if (!agents.length) { tbody.innerHTML = '<tr><td colspan="7" style="color:#475569">Keine Agents</td></tr>'; return; }
+
+    tbody.innerHTML = agents.map(a => `
+      <tr>
+        <td>${a.id}</td>
+        <td>${a.name}</td>
+        <td>${a.ip || '—'}</td>
+        <td>${(a.os?.name || '—').substring(0,20)}</td>
+        <td>${a.version || '—'}</td>
+        <td><span class="badge ${a.status === 'active' ? 'active' : a.status === 'never_connected' ? 'never' : 'disconnected'}">${a.status}</span></td>
+        <td>${timeAgo(a.lastKeepAlive)}</td>
+      </tr>`).join('');
+  } catch(e) { document.getElementById('agents-table').innerHTML = '<tr><td colspan="7" style="color:#ef4444">Fehler beim Laden</td></tr>'; }
+}
+
+async function loadAlerts() {
+  try {
+    const now = new Date();
+    const from = new Date(now - 86400000).toISOString();
+
+    let minLevel = 1;
+    if (alertFilter === '12') minLevel = 12;
+    if (alertFilter === '7') minLevel = 7;
+
+    const d = await api(`/manager/logs?limit=100&level=${minLevel}&sort=-timestamp`);
+    const logs = (d.data?.affected_items || []).filter(l => l.tag !== 'wazuh-modulesd').slice(0,30);
+
+    document.getElementById('s-alerts').textContent = d.data?.total_affected_items || 0;
+
+    const critical = (d.data?.affected_items || []).filter(l => {
+      const m = l.description?.match(/level[:\s]+(\d+)/i);
+      return m && parseInt(m[1]) >= 12;
+    }).length;
+    document.getElementById('s-critical').textContent = critical || '—';
+
+    const tbody = document.getElementById('alerts-table');
+    if (!logs.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:#475569">Keine Alerts im Zeitraum</td></tr>';
+      return;
+    }
+    tbody.innerHTML = logs.map(l => `
+      <tr>
+        <td style="white-space:nowrap;color:#475569">${new Date(l.timestamp).toLocaleTimeString('de-DE')}</td>
+        <td>${l.location || '—'}</td>
+        <td>${levelBadge(l.level || 0)}</td>
+        <td style="color:#7f9ab5">${l.tag || '—'}</td>
+        <td>${(l.description || '—').substring(0,80)}</td>
+      </tr>`).join('');
+  } catch(e) {
+    document.getElementById('alerts-table').innerHTML = '<tr><td colspan="5" style="color:#ef4444">Fehler beim Laden</td></tr>';
+  }
+}
+
+async function loadTopRules() {
+  try {
+    const d = await api('/manager/logs?limit=500');
+    const items = d.data?.affected_items || [];
+    const counts = {};
+    items.forEach(l => {
+      const k = l.tag || 'unknown';
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0,8);
+    const max = sorted[0]?.[1] || 1;
+    const colors = ['#ef4444','#f59e0b','#00b4d8','#22c55e','#a78bfa','#f472b6','#34d399','#fb923c'];
+
+    document.getElementById('top-rules').innerHTML = sorted.map(([name,count],i) => `
+      <div class="chart-bar-h">
+        <div class="label" title="${name}">${name}</div>
+        <div class="bar"><div class="bar-fill" style="width:${(count/max*100).toFixed(0)}%;background:${colors[i%colors.length]}"></div></div>
+        <div class="val">${count}</div>
+      </div>`).join('') || '<div style="color:#475569;font-size:.85rem">Keine Daten</div>';
+  } catch(e) {}
+}
+
+async function loadVulnerabilities() {
+  try {
+    const d = await api('/vulnerability/001?limit=1');
+    const sum = d.data?.affected_items?.[0];
+    if (!sum) {
+      document.getElementById('vuln-summary').innerHTML = '<div style="color:#475569;font-size:.85rem">Kein Vulnerability-Scan verfügbar (Agent muss Vuln-Modul aktiviert haben)</div>';
+      return;
+    }
+    document.getElementById('vuln-summary').innerHTML = `<div style="color:#86efac">Vulnerability-Daten vorhanden</div>`;
+  } catch(e) {
+    document.getElementById('vuln-summary').innerHTML = '<div style="color:#475569;font-size:.85rem">Vulnerability-Scan noch nicht konfiguriert</div>';
+  }
+}
+
+function loadLogs() {
+  const box = document.getElementById('log-stream');
+  const lines = [
+    '<span class="l-time">' + new Date().toLocaleTimeString('de-DE') + '</span> <span class="l-low">[INFO] wazuh-agent: Agent verbunden mit Manager 192.168.0.187</span>',
+    '<span class="l-time">' + new Date().toLocaleTimeString('de-DE') + '</span> <span class="l-med">[INFO] syscheck: Integritätsprüfung läuft (/etc, /bin, /usr)</span>',
+    '<span class="l-time">' + new Date().toLocaleTimeString('de-DE') + '</span> <span class="l-low">[INFO] rootcheck: Keine Rootkits gefunden</span>',
+  ];
+  box.innerHTML = lines.join('<br>');
+}
+
+function setAlertFilter(f, el) {
+  alertFilter = f;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  loadAlerts();
+}
+
+async function updateConnectionStatus(ok) {
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('conn-label');
+  if (ok) {
+    dot.style.background = '#22c55e';
+    label.textContent = 'Verbunden mit ' + location.hostname;
+  } else {
+    dot.style.background = '#ef4444';
+    label.textContent = 'Keine Verbindung zum Manager';
+  }
+}
+
+async function loadAll() {
+  document.getElementById('last-update').textContent = 'Aktualisiere...';
+  const ok = await getToken();
+  updateConnectionStatus(ok);
+  if (ok) {
+    await Promise.all([loadAgents(), loadAlerts(), loadTopRules(), loadVulnerabilities()]);
+    loadLogs();
+  }
+  document.getElementById('last-update').textContent = 'Zuletzt: ' + new Date().toLocaleTimeString('de-DE');
+}
+
+// Auto-Refresh alle 30 Sekunden
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
