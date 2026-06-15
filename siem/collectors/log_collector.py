@@ -49,7 +49,12 @@ class FileLogCollector:
                     if file_obj:
                         file_obj.close()
                     file_obj = open(path, "r", errors="replace")
-                    file_obj.seek(0, 2)  # seek to end on first open
+                    # Read last 200 lines on startup, then tail from there
+                    file_obj.seek(0, 2)
+                    end = file_obj.tell()
+                    # Seek back ~16KB to get recent lines
+                    file_obj.seek(max(0, end - 16384))
+                    file_obj.readline()  # discard partial first line
                     pos = file_obj.tell()
                     inode = current_inode
                     logger.debug("Opened %s (inode %d)", path, inode)
