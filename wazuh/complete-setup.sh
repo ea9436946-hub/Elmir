@@ -315,22 +315,19 @@ sudo docker exec "$MANAGER" bash -c "cat > /var/ossec/etc/rules/local_rules.xml"
 RULES
 
 # ── 5. Agent Vulnerability-Scan aktivieren ────────────────────────────────────
-log "Aktiviere Vulnerability-Scan im Agent..."
-cat >> /var/ossec/etc/ossec.conf <<'VULN'
-
-  <!-- Vulnerability Detection -->
-  <wodle name="syscollector">
-    <disabled>no</disabled>
-    <interval>1h</interval>
-    <scan_on_start>yes</scan_on_start>
-    <hardware>yes</hardware>
-    <os>yes</os>
-    <network>yes</network>
-    <packages>yes</packages>
-    <ports all="no">yes</ports>
-    <processes>yes</processes>
-  </wodle>
-VULN
+log "Aktiviere Vulnerability-Scan im Agent (vor </ossec_config> einfügen)..."
+sudo sed -i '/<\/ossec_config>/i\
+  <wodle name="syscollector">\
+    <disabled>no</disabled>\
+    <interval>1h</interval>\
+    <scan_on_start>yes</scan_on_start>\
+    <hardware>yes</hardware>\
+    <os>yes</os>\
+    <network>yes</network>\
+    <packages>yes</packages>\
+    <ports all="no">yes</ports>\
+    <processes>yes</processes>\
+  </wodle>' /var/ossec/etc/ossec.conf
 
 # ── 6. Manager neu starten ────────────────────────────────────────────────────
 log "Starte Manager neu..."
