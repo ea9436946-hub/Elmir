@@ -1,9 +1,11 @@
-"""Elmir SIEM — main entry point."""
+"""Elmir SIEM v2 — main entry point."""
 import logging
+import os
 import queue
 import signal
 import sys
 import time
+from threading import Thread
 from pathlib import Path
 
 import colorlog
@@ -12,15 +14,26 @@ from .config import load_config
 from .storage import EventStore
 from .parsers import parse_line
 from .collectors import FileLogCollector, SyslogCollector
+from .collectors.suricata_collector import SuricataCollector
 from .correlations import RuleEngine
 from .alerts import AlertManager
 from .dashboard.web_dashboard import WebDashboard
+
+BANNER = r"""
+  ███████╗██╗     ███╗   ███╗██╗██████╗     ███████╗██╗███████╗███╗   ███╗
+  ██╔════╝██║     ████╗ ████║██║██╔══██╗    ██╔════╝██║██╔════╝████╗ ████║
+  █████╗  ██║     ██╔████╔██║██║██████╔╝    ███████╗██║█████╗  ██╔████╔██║
+  ██╔══╝  ██║     ██║╚██╔╝██║██║██╔══██╗    ╚════██║██║██╔══╝  ██║╚██╔╝██║
+  ███████╗███████╗██║ ╚═╝ ██║██║██║  ██║    ███████║██║███████╗██║ ╚═╝ ██║
+  ╚══════╝╚══════╝╚═╝     ╚═╝╚═╝╚═╝  ╚═╝    ╚══════╝╚═╝╚══════╝╚═╝     ╚═╝
+  v2.0  Security Information & Event Management
+"""
 
 
 def _setup_logging(level: str):
     handler = colorlog.StreamHandler()
     handler.setFormatter(colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        "%(log_color)s%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         log_colors={
             "DEBUG": "cyan", "INFO": "green", "WARNING": "yellow",
@@ -30,16 +43,27 @@ def _setup_logging(level: str):
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.addHandler(handler)
-    # Silence noisy Flask/werkzeug output
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    logging.getLogger("geventwebsocket").setLevel(logging.WARNING)
+    logging.getLogger("engineio").setLevel(logging.WARNING)
+    logging.getLogger("socketio").setLevel(logging.WARNING)
+
+
+def _start_prometheus(port: int):
+    try:
+        from prometheus_client import start_http_server
+        start_http_server(port)
+        logging.getLogger("siem.main").info("Prometheus metrics: http://0.0.0.0:%d", port)
+    except Exception as e:
+        logging.getLogger("siem.main").warning("Prometheus not available: %s", e)
 
 
 def main():
+    print(BANNER)
     config = load_config()
     _setup_logging(config["siem"]["log_level"])
     logger = logging.getLogger("siem.main")
-
-    logger.info("Starting Elmir SIEM v%s", config["siem"]["version"])
+    logger.info("Starting Elmir SIEM %s", config["siem"]["version"])
 
     # Storage
     store = EventStore(
@@ -54,17 +78,37 @@ def main():
     # Correlation engine
     rule_engine = RuleEngine(config, store, alert_mgr)
 
+    # Dashboard
+    dash_cfg = config.get("dashboard", {})
+    dashboard = None
+    if dash_cfg.get("enabled", True):
+        dashboard = WebDashboard(dash_cfg, store)
+        dashboard.start()
+
+    # Wire alert push to dashboard WebSocket
+    if dashboard:
+        rule_engine.on_alert(dashboard.push_alert)
+
+    # Prometheus metrics server
+    metrics_cfg = config.get("metrics", {})
+    if metrics_cfg.get("enabled", True):
+        _start_prometheus(metrics_cfg.get("port", 9091))
+
     # Event processing queue
     event_queue: queue.Queue = queue.Queue(maxsize=10000)
+
+    def on_event(event: dict, source: str = ""):
+        if source:
+            event["source"] = event.get("source") or source
+        try:
+            event_queue.put_nowait(event)
+        except queue.Full:
+            logger.warning("Event queue full, dropping event from %s", source)
 
     def on_line(line: str, source: str):
         event = parse_line(line)
         if event:
-            event["source"] = event.get("source") or source
-            try:
-                event_queue.put_nowait(event)
-            except queue.Full:
-                logger.warning("Event queue full, dropping event")
+            on_event(event, source)
 
     # Collectors
     collectors = []
@@ -78,6 +122,7 @@ def main():
         )
         fc.start()
         collectors.append(fc)
+        logger.info("File collector watching %d paths", len(file_cfg.get("paths", [])))
 
     syslog_cfg = config["collectors"]["syslog"]
     if syslog_cfg.get("enabled"):
@@ -90,15 +135,32 @@ def main():
         sc.start()
         collectors.append(sc)
 
-    # Dashboard
-    dash_cfg = config.get("dashboard", {})
-    if dash_cfg.get("enabled", True):
-        dashboard = WebDashboard(dash_cfg, store)
-        dashboard.start()
+    suricata_cfg = config.get("collectors", {}).get("suricata", {})
+    if suricata_cfg.get("enabled"):
+        eve_path = suricata_cfg.get("eve_path", "/var/log/suricata/eve.json")
+        sur = SuricataCollector(eve_path=eve_path, callback=on_event)
+        sur.start()
+        collectors.append(sur)
+
+    wazuh_cfg = config.get("collectors", {}).get("wazuh", {})
+    if wazuh_cfg.get("enabled"):
+        try:
+            from .collectors.wazuh_collector import WazuhCollector
+            wc = WazuhCollector(
+                url=wazuh_cfg.get("url", "https://127.0.0.1:55000"),
+                username=os.environ.get("WAZUH_USER", "admin"),
+                password=os.environ.get("WAZUH_PASS", "SecretPassword"),
+                poll_interval=wazuh_cfg.get("poll_interval", 30),
+                callback=on_event,
+            )
+            wc.start()
+            collectors.append(wc)
+        except Exception as e:
+            logger.warning("Wazuh collector failed to start: %s", e)
 
     # Graceful shutdown
     def _shutdown(sig, frame):
-        logger.info("Shutting down…")
+        logger.info("Shutting down Elmir SIEM…")
         for c in collectors:
             if hasattr(c, "stop"):
                 c.stop()
@@ -107,7 +169,7 @@ def main():
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    logger.info("SIEM running. Press Ctrl+C to stop.")
+    logger.info("Elmir SIEM running — Dashboard: http://0.0.0.0:%d", dash_cfg.get("port", 8080))
 
     # Main processing loop
     while True:
@@ -118,6 +180,8 @@ def main():
 
         event_id = store.store_event(event)
         event["id"] = event_id
+        if dashboard:
+            dashboard.record_event(event)
         rule_engine.process(event)
 
 

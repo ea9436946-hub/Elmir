@@ -1,6 +1,6 @@
 siem:
   name: "Elmir SIEM"
-  version: "1.0.0"
+  version: "2.0.0"
   log_level: INFO
 
 storage:
@@ -16,6 +16,8 @@ collectors:
       - /var/log/syslog
       - /var/log/apache2/access.log
       - /var/log/nginx/access.log
+      - /var/log/kern.log
+      - /var/log/dpkg.log
     poll_interval: 5
 
   syslog:
@@ -24,11 +26,25 @@ collectors:
     tcp_port: 5514
     bind_host: "0.0.0.0"
 
+  suricata:
+    enabled: true
+    eve_path: /var/log/suricata/eve.json
+
+  wazuh:
+    enabled: false
+    url: "https://192.168.0.187:55000"
+    # Credentials via env: WAZUH_USER, WAZUH_PASS
+    poll_interval: 30
+
 dashboard:
   enabled: true
   host: "0.0.0.0"
   port: 8080
   secret_key: "change-me-in-production"
+
+metrics:
+  enabled: true
+  port: 9091
 
 alerts:
   email:
@@ -60,5 +76,21 @@ correlations:
     severity: HIGH
 
   privilege_escalation:
+    enabled: true
+    severity: CRITICAL
+
+  lateral_movement:
+    enabled: true
+    threshold: 3
+    window_seconds: 120
+    severity: CRITICAL
+
+  data_exfiltration:
+    enabled: true
+    threshold: 50
+    window_seconds: 60
+    severity: HIGH
+
+  malware_download:
     enabled: true
     severity: CRITICAL

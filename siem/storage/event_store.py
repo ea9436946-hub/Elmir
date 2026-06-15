@@ -161,3 +161,60 @@ class EventStore:
                 conn.execute(
                     "UPDATE alerts SET acknowledged = 1 WHERE id = ?", (alert_id,)
                 )
+
+    def get_timeline(self, hours: int = 24) -> list:
+        since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT strftime('%Y-%m-%dT%H:00:00', timestamp) as hour,
+                          COUNT(*) as count
+                   FROM events
+                   WHERE timestamp >= ?
+                   GROUP BY hour
+                   ORDER BY hour""",
+                (since,),
+            ).fetchall()
+        return [{"hour": r["hour"], "count": r["count"]} for r in rows]
+
+    def get_top_ips(self, limit: int = 10) -> list:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT source_ip, COUNT(*) as count
+                   FROM events
+                   WHERE source_ip IS NOT NULL AND source_ip != ''
+                   GROUP BY source_ip
+                   ORDER BY count DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [{"ip": r["source_ip"], "count": r["count"]} for r in rows]
+
+    def get_events_paginated(self, page: int = 1, limit: int = 50,
+                              severity: str = None, ip: str = None,
+                              search: str = None) -> dict:
+        offset = (page - 1) * limit
+        conditions = []
+        params = []
+        if severity:
+            conditions.append("severity = ?")
+            params.append(severity)
+        if ip:
+            conditions.append("source_ip = ?")
+            params.append(ip)
+        if search:
+            conditions.append("(message LIKE ? OR event_type LIKE ? OR source_ip LIKE ?)")
+            params.extend([f"%{search}%", f"%{search}%", f"%{search}%"])
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self._get_conn() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM events {where}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT * FROM events {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+        return {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": max(1, (total + limit - 1) // limit),
+            "items": [dict(r) for r in rows],
+        }
