@@ -2,7 +2,7 @@
 # Wazuh Passwort automatisch finden und zurücksetzen
 set -e
 
-NEW_PASS="WazuhAdmin2024!"
+NEW_PASS="S3cur3SIEM#2024"
 INDEXER="https://localhost:9200"
 
 echo "[+] Suche aktuelles Passwort..."
